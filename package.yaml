@@ -1,0 +1,31 @@
+name:                teletabs
+version:             0.1.0.0
+github:              aethelz/teletabs
+license:             BSD3
+author:              aethelz
+maintainer:          "example@example.com"
+
+default-extensions:
+  - OverloadedStrings
+
+dependencies:
+  - base
+  - telegram-bot-simple
+  - text
+
+ghc-options:
+  - -Wall
+  - -Wcompat
+  - -threaded
+  - -rtsopts
+  - -with-rtsopts=-N
+
+executables:
+  teletabs:
+    main:                Main.hs
+    source-dirs:         app
+    dependencies:
+    - teletabs
+
+library:
+  source-dirs: src
