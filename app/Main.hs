@@ -1,6 +1,6 @@
 module Main where
 
-import           Data.Text                            (Text, pack)
+import           Data.Text                            (Text)
 import qualified Data.Text                            as Text
 import           Control.Applicative                  ((<|>))
 import           Control.Monad                        ((>=>))
@@ -14,7 +14,7 @@ import           Telegram.Bot.Simple.UpdateParser
 
 data Model = Model
   { todoItems :: [TodoItem]
-  , allowedUsers :: [Telegram.User]
+  , allowedUsers :: [Int32]
   } deriving (Show)
 
 type TodoItem = Text
@@ -29,42 +29,33 @@ showItems = Text.unlines
 userList :: IO [Int32]
 userList = (fmap read) <$> (words <$> getEnv "ALLOWED_USERS")
 
-allowedCheck :: Telegram.User -> Bool
-allowedCheck user = flip elem [00000000, 99999999] uid
--- allowedCheck user = elem uid <$> userList
+allowedCheck :: Model -> Telegram.User -> Bool
+allowedCheck model user = elem uid (allowedUsers model)
   where uid = extractID (Telegram.userId user)
         extractID (Telegram.UserId i) = i
 
 data Action
   = DoNothing
-  | FailID
+  | TestID
   | AddItem Text
   | ShowItems
   deriving (Show)
 
-testID :: UpdateParser Bool
-testID =
+testID :: Model -> UpdateParser Bool
+testID model =
   let user = (Telegram.updateMessage >=> Telegram.messageFrom)
-    in UpdateParser $ fmap allowedCheck . user
+    in UpdateParser $ fmap (allowedCheck model) . user
 
-guardID :: UpdateParser Bool
-guardID = do
-  t <- testID
+guardID :: Model -> UpdateParser Bool
+guardID model = do
+  t <- testID model
   if True == t
   then fail "User not allowed"
   else pure t
 
-bot :: BotApp Model Action
-bot = BotApp
-  { botInitialModel = Model [] []
-  , botAction = flip handleUpdate
-  , botHandler = handleAction
-  , botJobs = []
-  }
-
 handleUpdate :: Model -> Telegram.Update -> Maybe Action
-handleUpdate _model = parseUpdate
-   $  FailID    <$  guardID
+handleUpdate model = parseUpdate
+   $  TestID    <$  (guardID model)
   <|> ShowItems <$  command "show"
   <|> AddItem   <$> text
 
@@ -72,7 +63,7 @@ handleAction :: Action -> Model -> Eff Action Model
 handleAction action model =
   case action of
     DoNothing -> pure model
-    FailID -> model <# do
+    TestID -> model <# do
       replyText $ "YOU ARE NOT ALLOWED TO INTERACT WITH THE BOT!"
       pure DoNothing
     AddItem title -> addItem title model <# do
@@ -82,9 +73,28 @@ handleAction action model =
       replyText (showItems (todoItems model))
       pure DoNothing
 
+inititalModel :: IO Model
+inititalModel = do
+  users <- userList
+  pure Model {
+    todoItems = []
+  , allowedUsers = users
+  }
+
+initBot :: IO (BotApp Model Action)
+initBot = do
+  model <- inititalModel
+  pure BotApp
+    { botInitialModel = model
+    , botAction = flip handleUpdate
+    , botHandler = handleAction
+    , botJobs = []
+    }
+
 run :: Telegram.Token -> IO ()
 run token = do
   env <- Telegram.defaultTelegramClientEnv token
+  bot <- initBot
   startBot_ (traceBotDefault bot) env
 
 main :: IO ()

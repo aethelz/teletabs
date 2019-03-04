@@ -12,6 +12,7 @@ dependencies:
   - base
   - telegram-bot-simple
   - text
+  - mtl
 
 ghc-options:
   - -Wall
