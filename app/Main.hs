@@ -30,14 +30,14 @@ clearItems :: Model -> Model
 clearItems model = model { todoItems = [] }
 
 removeItem :: Text -> Model -> Either Text Model
-removeItem i model
+removeItem input model
   | idx == Nothing              = Left "Not a Number"
   | 1 > fromJust idx            = Left "Incorrect Number"
   | length items < fromJust idx = Left "No such task"
   | otherwise = Right model { todoItems = delItem (fromJust idx - 1) items }
  where
   items = todoItems model
-  idx   = (readMaybe . Text.unpack) i
+  idx   = (readMaybe . Text.unpack) input
   delItem im xs = delete (xs !! im) xs
 
 showItems :: [TodoItem] -> Text
@@ -75,16 +75,11 @@ guardID model = do
 handleUpdate :: Model -> Telegram.Update -> Maybe Action
 handleUpdate model =
   parseUpdate
-    $   TestID
-    <$  (guardID model)
-    <|> ShowItems
-    <$  command "show"
-    <|> RemoveItem
-    <$> command "rm"
-    <|> ClearItems
-    <$  command "clear"
-    <|> AddItem
-    <$> text
+    $  TestID     <$  guardID model
+   <|> ShowItems  <$  command "show"
+   <|> RemoveItem <$> command "rm"
+   <|> ClearItems <$  command "clear"
+   <|> AddItem    <$> text
 
 handleAction :: Action -> Model -> Eff Action Model
 handleAction action model = case action of
