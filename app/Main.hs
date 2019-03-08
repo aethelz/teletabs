@@ -1,17 +1,17 @@
 module Main where
 
-import           Data.Text                            (Text)
-import qualified Data.Text                            as Text
-import           Control.Applicative                  ((<|>))
-import           Control.Monad                        ((>=>))
-import           System.Environment                   (getEnv)
-import Data.Int (Int32)
-
-import qualified Telegram.Bot.API                     as Telegram
+import           Data.Text                      ( Text )
+import qualified Data.Text                     as Text
 import           Data.Char                      ( intToDigit )
 import           Data.Maybe                     ( fromJust )
 import           Data.List                      ( delete )
 import           Text.Read                      ( readMaybe )
+import           Control.Applicative            ( (<|>) )
+import           Control.Monad                  ( (>=>) )
+import           System.Environment             ( getEnv )
+import           Data.Int                       ( Int32 )
+
+import qualified Telegram.Bot.API              as Telegram
 import           Telegram.Bot.Simple
 import           Telegram.Bot.Simple.Debug
 import           Telegram.Bot.Simple.UpdateParser
@@ -24,8 +24,7 @@ data Model = Model
 type TodoItem = Text
 
 addItem :: TodoItem -> Model -> Model
-addItem item model = model
-  { todoItems = todoItems model ++ [item] }
+addItem item model = model { todoItems = todoItems model ++ [item] }
 
 clearItems :: Model -> Model
 clearItems model = model { todoItems = [] }
@@ -42,7 +41,7 @@ removeItem i model
   delItem im xs = delete (xs !! im) xs
 
 showItems :: [TodoItem] -> Text
-showItems = Text.unlines . zipWith (\a b -> intToText a <> ". " <> b) [1..]
+showItems = Text.unlines . zipWith (\a b -> intToText a <> ". " <> b) [1 ..]
   where intToText = Text.singleton . intToDigit
 
 userList :: IO [Int32]
@@ -50,8 +49,9 @@ userList = (fmap read) <$> (words <$> getEnv "ALLOWED_USERS")
 
 allowedCheck :: Model -> Telegram.User -> Bool
 allowedCheck model user = elem uid (allowedUsers model)
-  where uid = extractID (Telegram.userId user)
-        extractID (Telegram.UserId i) = i
+ where
+  uid = extractID (Telegram.userId user)
+  extractID (Telegram.UserId i) = i
 
 data Action
   = DoNothing
@@ -65,67 +65,66 @@ data Action
 testID :: Model -> UpdateParser Bool
 testID model =
   let user = (Telegram.updateMessage >=> Telegram.messageFrom)
-    in UpdateParser $ fmap (allowedCheck model) . user
+  in  UpdateParser $ fmap (allowedCheck model) . user
 
 guardID :: Model -> UpdateParser Bool
 guardID model = do
   t <- testID model
-  if True == t
-  then fail "User not allowed"
-  else pure t
+  if True == t then fail "User not allowed" else pure t
 
 handleUpdate :: Model -> Telegram.Update -> Maybe Action
-handleUpdate model = parseUpdate
-   $  TestID     <$  (guardID model)
-  <|> ShowItems  <$  command "show"
-  <|> RemoveItem <$> command "rm"
-  <|> ClearItems <$  command "clear"
-  <|> AddItem    <$> text
+handleUpdate model =
+  parseUpdate
+    $   TestID
+    <$  (guardID model)
+    <|> ShowItems
+    <$  command "show"
+    <|> RemoveItem
+    <$> command "rm"
+    <|> ClearItems
+    <$  command "clear"
+    <|> AddItem
+    <$> text
 
 handleAction :: Action -> Model -> Eff Action Model
-handleAction action model =
-  case action of
-    DoNothing -> pure model
-    TestID -> model <# do
-      replyText $ "YOU ARE NOT ALLOWED TO INTERACT WITH THE BOT!"
+handleAction action model = case action of
+  DoNothing -> pure model
+  TestID    -> model <# do
+    replyText $ "YOU ARE NOT ALLOWED TO INTERACT WITH THE BOT!"
+    pure DoNothing
+  AddItem title -> addItem title model <# do
+    replyText "Item added"
+    pure DoNothing
+  RemoveItem i -> case removeItem i model of
+    Left err -> model <# do
+      replyText err
       pure DoNothing
-    AddItem title -> addItem title model <# do
-      replyText "Item added"
-      pure DoNothing
-    RemoveItem i ->
-      case removeItem i model of
-        Left err -> model <# do
-          replyText err
-          pure DoNothing
-        Right newModel -> newModel <# do
-          replyText "Item removed"
-          pure ShowItems
-    ClearItems -> clearItems model <# do
-      replyText "List Cleared!"
-      pure DoNothing
-    ShowItems -> model <# do
-      let todoList = todoItems model
-      if null todoList
-        then replyText "No items to show!"
-        else replyText (showItems todoList)
-      pure DoNothing
+    Right newModel -> newModel <# do
+      replyText "Item removed"
+      pure ShowItems
+  ClearItems -> clearItems model <# do
+    replyText "List Cleared!"
+    pure DoNothing
+  ShowItems -> model <# do
+    let todoList = todoItems model
+    if null todoList
+      then replyText "No items to show!"
+      else replyText (showItems todoList)
+    pure DoNothing
 
 inititalModel :: IO Model
 inititalModel = do
   users <- userList
-  pure Model {
-    todoItems = []
-  , allowedUsers = users
-  }
+  pure Model {todoItems = [], allowedUsers = users}
 
 initBot :: IO (BotApp Model Action)
 initBot = do
   model <- inititalModel
   pure BotApp
     { botInitialModel = model
-    , botAction = flip handleUpdate
-    , botHandler = handleAction
-    , botJobs = []
+    , botAction       = flip handleUpdate
+    , botHandler      = handleAction
+    , botJobs         = []
     }
 
 run :: Telegram.Token -> IO ()
