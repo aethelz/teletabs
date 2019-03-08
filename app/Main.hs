@@ -8,6 +8,10 @@ import           System.Environment                   (getEnv)
 import Data.Int (Int32)
 
 import qualified Telegram.Bot.API                     as Telegram
+import           Data.Char                      ( intToDigit )
+import           Data.Maybe                     ( fromJust )
+import           Data.List                      ( delete )
+import           Text.Read                      ( readMaybe )
 import           Telegram.Bot.Simple
 import           Telegram.Bot.Simple.Debug
 import           Telegram.Bot.Simple.UpdateParser
@@ -21,10 +25,25 @@ type TodoItem = Text
 
 addItem :: TodoItem -> Model -> Model
 addItem item model = model
-  { todoItems = item : todoItems model }
+  { todoItems = todoItems model ++ [item] }
+
+clearItems :: Model -> Model
+clearItems model = model { todoItems = [] }
+
+removeItem :: Text -> Model -> Either Text Model
+removeItem i model
+  | idx == Nothing              = Left "Not a Number"
+  | 1 > fromJust idx            = Left "Incorrect Number"
+  | length items < fromJust idx = Left "No such task"
+  | otherwise = Right model { todoItems = delItem (fromJust idx - 1) items }
+ where
+  items = todoItems model
+  idx   = (readMaybe . Text.unpack) i
+  delItem im xs = delete (xs !! im) xs
 
 showItems :: [TodoItem] -> Text
-showItems = Text.unlines
+showItems = Text.unlines . zipWith (\a b -> intToText a <> ". " <> b) [1..]
+  where intToText = Text.singleton . intToDigit
 
 userList :: IO [Int32]
 userList = (fmap read) <$> (words <$> getEnv "ALLOWED_USERS")
@@ -37,7 +56,9 @@ allowedCheck model user = elem uid (allowedUsers model)
 data Action
   = DoNothing
   | TestID
-  | AddItem Text
+  | AddItem TodoItem
+  | RemoveItem TodoItem
+  | ClearItems
   | ShowItems
   deriving (Show)
 
@@ -55,9 +76,11 @@ guardID model = do
 
 handleUpdate :: Model -> Telegram.Update -> Maybe Action
 handleUpdate model = parseUpdate
-   $  TestID    <$  (guardID model)
-  <|> ShowItems <$  command "show"
-  <|> AddItem   <$> text
+   $  TestID     <$  (guardID model)
+  <|> ShowItems  <$  command "show"
+  <|> RemoveItem <$> command "rm"
+  <|> ClearItems <$  command "clear"
+  <|> AddItem    <$> text
 
 handleAction :: Action -> Model -> Eff Action Model
 handleAction action model =
@@ -67,10 +90,24 @@ handleAction action model =
       replyText $ "YOU ARE NOT ALLOWED TO INTERACT WITH THE BOT!"
       pure DoNothing
     AddItem title -> addItem title model <# do
-      replyText "Got it."
+      replyText "Item added"
+      pure DoNothing
+    RemoveItem i ->
+      case removeItem i model of
+        Left err -> model <# do
+          replyText err
+          pure DoNothing
+        Right newModel -> newModel <# do
+          replyText "Item removed"
+          pure ShowItems
+    ClearItems -> clearItems model <# do
+      replyText "List Cleared!"
       pure DoNothing
     ShowItems -> model <# do
-      replyText (showItems (todoItems model))
+      let todoList = todoItems model
+      if null todoList
+        then replyText "No items to show!"
+        else replyText (showItems todoList)
       pure DoNothing
 
 inititalModel :: IO Model
