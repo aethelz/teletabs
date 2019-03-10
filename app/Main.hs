@@ -3,7 +3,7 @@ module Main where
 import           Data.Text                      ( Text )
 import qualified Data.Text                     as Text
 import           Data.Char                      ( intToDigit )
-import           Data.Maybe                     ( fromJust )
+import           Data.Maybe                     ( fromJust, isJust )
 import           Data.List                      ( delete )
 import           Text.Read                      ( readMaybe )
 import           Control.Applicative            ( (<|>) )
@@ -16,12 +16,17 @@ import           Telegram.Bot.Simple
 import           Telegram.Bot.Simple.Debug
 import           Telegram.Bot.Simple.UpdateParser
 
+
 data Model = Model
-  { todoItems :: [TodoItem]
+  { todoItems    :: [TodoItem]
   , allowedUsers :: [Int32]
+  , convos       :: [Telegram.ChatId]
   } deriving (Show)
 
 type TodoItem = Text
+
+addConvo :: Telegram.ChatId -> Model -> Model
+addConvo chatId model = model { convos = chatId : convos model }
 
 addItem :: TodoItem -> Model -> Model
 addItem item model = model { todoItems = todoItems model ++ [item] }
@@ -56,26 +61,28 @@ allowedCheck model user = elem uid (allowedUsers model)
 data Action
   = DoNothing
   | TestID
+  | InitConvo
   | AddItem TodoItem
+  | AddConvo Telegram.ChatId
   | RemoveItem TodoItem
   | ClearItems
+  | NotifyOthers Telegram.ChatId
   | ShowItems
   deriving (Show)
-
-testID :: Model -> UpdateParser Bool
-testID model =
-  let user = (Telegram.updateMessage >=> Telegram.messageFrom)
-  in  UpdateParser $ fmap (allowedCheck model) . user
 
 guardID :: Model -> UpdateParser Bool
 guardID model = do
   t <- testID model
   if True == t then fail "User not allowed" else pure t
+ where
+  testID model' = UpdateParser $ fmap (allowedCheck model') . user
+  user = (Telegram.updateMessage >=> Telegram.messageFrom)
 
 handleUpdate :: Model -> Telegram.Update -> Maybe Action
 handleUpdate model =
   parseUpdate
     $  TestID     <$  guardID model
+   <|> InitConvo  <$  command "start"
    <|> ShowItems  <$  command "show"
    <|> RemoveItem <$> command "rm"
    <|> ClearItems <$  command "clear"
@@ -87,8 +94,22 @@ handleAction action model = case action of
   TestID    -> model <# do
     replyText $ "YOU ARE NOT ALLOWED TO INTERACT WITH THE BOT!"
     pure DoNothing
+  InitConvo -> model <# do
+    yourId <- currentChatId
+    if isJust yourId
+      then pure $ AddConvo $ fromJust yourId
+      else pure DoNothing
   AddItem title -> addItem title model <# do
     replyText "Item added"
+    yourId <- currentChatId
+    if isJust yourId
+      then pure $ NotifyOthers $ fromJust yourId
+      else pure DoNothing
+  NotifyOthers current -> model <# do
+    mapM_ (flip replyTo "List was updated")
+      $ map Telegram.SomeChatId
+      $ filter (/= current)
+      $ convos model
     pure DoNothing
   RemoveItem i -> case removeItem i model of
     Left err -> model <# do
@@ -100,6 +121,9 @@ handleAction action model = case action of
   ClearItems -> clearItems model <# do
     replyText "List Cleared!"
     pure DoNothing
+  AddConvo convoId -> addConvo convoId model <# do
+      replyText $ "Your ID added"
+      pure DoNothing
   ShowItems -> model <# do
     let todoList = todoItems model
     if null todoList
@@ -110,7 +134,11 @@ handleAction action model = case action of
 inititalModel :: IO Model
 inititalModel = do
   users <- userList
-  pure Model {todoItems = [], allowedUsers = users}
+  pure Model
+    { todoItems    = []
+    , allowedUsers = users
+    , convos       = []
+    }
 
 initBot :: IO (BotApp Model Action)
 initBot = do
