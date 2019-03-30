@@ -73,14 +73,13 @@ data Action
 guardID :: Model -> UpdateParser Bool
 guardID model = do
   t <- testID model
-  if True == t then fail "User not allowed" else pure t
+  if t then fail "User not allowed" else pure t
  where
   testID model' = UpdateParser $ fmap (allowedCheck model') . user
   user = (Telegram.updateMessage >=> Telegram.messageFrom)
 
 handleUpdate :: Model -> Telegram.Update -> Maybe Action
-handleUpdate model =
-  parseUpdate
+handleUpdate model = parseUpdate
     $  TestID     <$  guardID model
    <|> InitConvo  <$  command "start"
    <|> ShowItems  <$  command "show"
@@ -128,7 +127,7 @@ handleAction action model = case action of
     let todoList = todoItems model
     if null todoList
       then replyText "No items to show!"
-      else replyText (showItems todoList)
+      else replyText $ showItems todoList
     pure DoNothing
 
 inititalModel :: IO Model
