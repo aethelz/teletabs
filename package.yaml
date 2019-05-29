@@ -27,8 +27,3 @@ executables:
   teletabs:
     main:                Main.hs
     source-dirs:         app
-    dependencies:
-    - teletabs
-
-library:
-  source-dirs: src
